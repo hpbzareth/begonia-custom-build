@@ -44,6 +44,41 @@ jobs:
             https://github.com/xiaomi-begonia-dev/android_kernel_xiaomi_mt6785 \
             kernel_source
 
+      - name: "🔧 Fix Kernel Source Merge Conflicts"
+        working-directory: kernel_source
+        run: |
+          cat << 'EOF' > fix-conflict.patch
+          --- a/drivers/mmc/core/block.c
+          +++ b/drivers/mmc/core/block.c
+          @@ -1325,17 +1325,14 @@
+           	const unsigned int mask = EXT_CSD_PART_CONFIG_ACC_RPMB;
+           	int ret = 0;
+           
+          -<<<<<<< HEAD
+           #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
+           	if (part_type == EXT_CSD_PART_CONFIG_ACC_RPMB)
+           		mmc_retune_unpause(card->host);
+           
+           	/* enable cmdq
+           	 * if partition supports cmdq
+           	 */
+           	if ((!mmc_card_cmdq(card)) && (part_type <= PART_CMDQ_EN)) {
+           		ret = mmc_cmdq_enable(card);
+           		if (ret)
+           			return ret;
+           	}
+           #else
+          -
+          -	if (part_type == EXT_CSD_PART_CONFIG_ACC_RPMB) {
+          -=======
+           	if ((part_type & mask) == mask) {
+          ->>>>>>> 014241ad77dda0eafbdf671d5b8e86917d8ec97e
+           		mmc_retune_unpause(card->host);
+           		if (card->reenable_cmdq && !card->ext_csd.cmdq_en)
+           			ret = mmc_cmdq_enable(card);
+          EOF
+          patch -p1 < fix-conflict.patch
+
       - name: "🌿 Integrate KernelSU-Next (legacy)"
         working-directory: kernel_source
         run: |
@@ -55,6 +90,41 @@ jobs:
 
           # Chạy setup.sh → tạo drivers/kernelsu symlink + patch Makefile/Kconfig
           bash KernelSU-Next/kernel/setup.sh
+      - name: "🔧 Fix Kernel Source Merge Conflicts"
+        working-directory: kernel_source
+        run: |
+          cat << 'EOF' > fix-conflict.patch
+          --- a/drivers/mmc/core/block.c
+          +++ b/drivers/mmc/core/block.c
+          @@ -1325,17 +1325,14 @@
+           	const unsigned int mask = EXT_CSD_PART_CONFIG_ACC_RPMB;
+           	int ret = 0;
+           
+          -<<<<<<< HEAD
+           #if defined(CONFIG_MTK_EMMC_CQ_SUPPORT) || defined(CONFIG_MTK_EMMC_HW_CQ)
+           	if (part_type == EXT_CSD_PART_CONFIG_ACC_RPMB)
+           		mmc_retune_unpause(card->host);
+           
+           	/* enable cmdq
+           	 * if partition supports cmdq
+           	 */
+           	if ((!mmc_card_cmdq(card)) && (part_type <= PART_CMDQ_EN)) {
+           		ret = mmc_cmdq_enable(card);
+           		if (ret)
+           			return ret;
+           	}
+           #else
+          -
+          -	if (part_type == EXT_CSD_PART_CONFIG_ACC_RPMB) {
+          -=======
+           	if ((part_type & mask) == mask) {
+          ->>>>>>> 014241ad77dda0eafbdf671d5b8e86917d8ec97e
+           		mmc_retune_unpause(card->host);
+           		if (card->reenable_cmdq && !card->ext_csd.cmdq_en)
+           			ret = mmc_cmdq_enable(card);
+          EOF
+          patch -p1 < fix-conflict.patch
+
       - name: "🌿 Integrate KernelSU-Next"
         working-directory: kernel_source
         run: |
@@ -165,5 +235,6 @@ jobs:
           name: "build-log-${{ github.run_id }}"
           path: build.log
           retention-days: 3
+
 
 
