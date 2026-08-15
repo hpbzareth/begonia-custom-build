@@ -6,7 +6,7 @@ on:
       kernel_branch:
         description: "Kernel source branch"
         required: true
-        default: "fifteen"
+        default: "aosp-13"
         type: choice
         options:
           - fifteen
