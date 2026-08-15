@@ -1,0 +1,207 @@
+name: "🔨 Build Begonia Kernel"
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: "Kernel source branch"
+        required: true
+        default: "fifteen"
+        type: choice
+        options:
+          - fifteen
+          - fourteen
+          - aosp-13
+
+env:
+  # ── Kernel ──────────────────────────────────────────────
+  KERNEL_REPO: "https://github.com/xiaomi-begonia-dev/android_kernel_xiaomi_mt6785"
+  ARCH: "arm64"
+  DEFCONFIG: "begonia_user_defconfig"
+  OUT_DIR: "${{ github.workspace }}/out"
+
+  # ── Toolchain (crDroid Clang r547379) ───────────────────
+  CLANG_REPO: "https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379"
+  CLANG_BRANCH: "15.0"
+
+  # ── KernelSU Next + SUSFS ───────────────────────────────
+  KSU_REPO: "https://github.com/sidex15/KernelSU-Next"
+  KSU_BRANCH: "legacy-susfs-v2"
+
+  # ── AnyKernel3 ──────────────────────────────────────────
+  AK3_REPO: "https://github.com/osm0sis/AnyKernel3"
+
+jobs:
+  build:
+    name: "🐎 Build Kernel"
+    runs-on: ubuntu-22.04
+
+    steps:
+      # ─────────────────────────────────────────────────────
+      # 1. Dependencies
+      # ─────────────────────────────────────────────────────
+      - name: "📦 Install build dependencies"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential bc bison flex \
+            libssl-dev libfl-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            curl git zip unzip tar python3 ccache
+
+      # ─────────────────────────────────────────────────────
+      # 2. Toolchain
+      # ─────────────────────────────────────────────────────
+      - name: "🔧 Clone crDroid Clang toolchain"
+        run: |
+          git clone --depth=1 \
+            --branch "$CLANG_BRANCH" \
+            "$CLANG_REPO" \
+            "${{ github.workspace }}/clang"
+          echo "${{ github.workspace }}/clang/bin" >> $GITHUB_PATH
+
+      # ─────────────────────────────────────────────────────
+      # 3. Kernel source
+      # ─────────────────────────────────────────────────────
+      - name: "📥 Clone kernel source (${{ github.event.inputs.kernel_branch }})"
+        run: |
+          git clone --depth=1 \
+            --branch "${{ github.event.inputs.kernel_branch }}" \
+            "$KERNEL_REPO" \
+            kernel_source
+
+      # ─────────────────────────────────────────────────────
+      # 4. KernelSU Next (sidex15 legacy-susfs-v2)
+      # ─────────────────────────────────────────────────────
+      - name: "🌿 Integrate KernelSU-Next + SUSFS (legacy)"
+        working-directory: kernel_source
+        run: |
+          echo "━━━ Step 1: Run setup.sh from sidex15/legacy-susfs-v2 ━━━"
+          # Fetch setup.sh trực tiếp từ nhánh đúng để patch Makefile/Kconfig
+          curl -LSs \
+            "https://raw.githubusercontent.com/sidex15/KernelSU-Next/$KSU_BRANCH/kernel/setup.sh" \
+            | bash -s "$KSU_BRANCH"
+
+          echo "━━━ Step 2: Verify KernelSU integration ━━━"
+          KSU_VERSION=$(git -C KernelSU describe --tags --abbrev=0 2>/dev/null || echo "unknown")
+          echo "✅ KernelSU-Next version: $KSU_VERSION"
+
+          echo "━━━ Step 3: Enable KSU + SUSFS configs ━━━"
+          CFG="arch/arm64/configs/$DEFCONFIG"
+          set_config() {
+            local key="$1"
+            local val="$2"
+            if grep -q "# $key is not set" "$CFG"; then
+              sed -i "s/# $key is not set/$key=$val/" "$CFG"
+            elif grep -q "^$key=" "$CFG"; then
+              sed -i "s/^$key=.*/$key=$val/" "$CFG"
+            else
+              echo "$key=$val" >> "$CFG"
+            fi
+          }
+
+          set_config CONFIG_KSU              y
+          set_config CONFIG_KSU_MANUAL_HOOK  y   # Bắt buộc cho non-GKI (kernel 4.14)
+          set_config CONFIG_KSU_SUSFS        y
+          set_config CONFIG_KSU_SUSFS_SUS_SU y   # su hiding (SUSFS v2)
+
+          echo "✅ Defconfig updated:"
+          grep -E "^CONFIG_KSU" "$CFG"
+
+      # ─────────────────────────────────────────────────────
+      # 5. AnyKernel3
+      # ─────────────────────────────────────────────────────
+      - name: "🗜️ Clone AnyKernel3"
+        run: |
+          git clone --depth=1 "$AK3_REPO" AnyKernel3
+          # Xoá file thừa không cần thiết cho packaging
+          rm -f AnyKernel3/{LICENSE,README.md}
+
+      # ─────────────────────────────────────────────────────
+      # 6. make defconfig
+      # ─────────────────────────────────────────────────────
+      - name: "⚙️ Generate defconfig"
+        working-directory: kernel_source
+        run: |
+          make -j$(nproc) \
+            ARCH="$ARCH" \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            O="$OUT_DIR" \
+            "$DEFCONFIG"
+
+      # ─────────────────────────────────────────────────────
+      # 7. Build
+      # ─────────────────────────────────────────────────────
+      - name: "🏗️ Build kernel"
+        working-directory: kernel_source
+        run: |
+          make -j$(nproc) \
+            ARCH="$ARCH" \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            O="$OUT_DIR" \
+            2>&1 | tee "${{ github.workspace }}/build.log"
+
+          echo "━━━ Build finished: $(date) ━━━"
+
+      # ─────────────────────────────────────────────────────
+      # 8. Package
+      # ─────────────────────────────────────────────────────
+      - name: "📦 Package AnyKernel3 zip"
+        run: |
+          # Tìm kernel image (ưu tiên Image.gz-dtb → Image.gz → Image)
+          BOOT_DIR="$OUT_DIR/arch/arm64/boot"
+          KERNEL_IMG=""
+          for img in Image.gz-dtb Image.gz Image; do
+            if [ -f "$BOOT_DIR/$img" ]; then
+              KERNEL_IMG="$BOOT_DIR/$img"
+              echo "✅ Found kernel image: $img"
+              break
+            fi
+          done
+
+          if [ -z "$KERNEL_IMG" ]; then
+            echo "❌ No kernel image found! Contents of boot dir:"
+            ls "$BOOT_DIR" || true
+            exit 1
+          fi
+
+          cp "$KERNEL_IMG" AnyKernel3/
+
+          # Tạo tên file zip
+          BUILD_DATE=$(date +%Y%m%d-%H%M)
+          KSU_VER=$(git -C kernel_source/KernelSU describe --tags --abbrev=0 2>/dev/null || echo "KSU")
+          ZIP_NAME="Begonia-${{ github.event.inputs.kernel_branch }}-${KSU_VER}-SUSFS-${BUILD_DATE}"
+
+          cd AnyKernel3
+          zip -r9 "${{ github.workspace }}/${ZIP_NAME}.zip" . \
+            -x '*.git*' '*.github*' '*placeholder'
+
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "✅ Packaged: ${ZIP_NAME}.zip ($(du -sh ${{ github.workspace }}/${ZIP_NAME}.zip | cut -f1))"
+
+      # ─────────────────────────────────────────────────────
+      # 9. Upload artifact
+      # ─────────────────────────────────────────────────────
+      - name: "📤 Upload kernel zip"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}.zip
+          retention-days: 7
+
+      # ─────────────────────────────────────────────────────
+      # 10. Upload log on failure
+      # ─────────────────────────────────────────────────────
+      - name: "📋 Upload build log (on failure)"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "build-log-${{ github.run_id }}"
+          path: build.log
+          retention-days: 3
