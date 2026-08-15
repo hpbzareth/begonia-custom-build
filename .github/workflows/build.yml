@@ -72,6 +72,7 @@ jobs:
           git clone https://github.com/devnoname120/kernelsu-coccinelle.git ../ksu-cocci
           cd ../ksu-cocci/classic-hooks
           bash apply.sh ../../kernel_source
+          cd ../../kernel_source
           scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KSU
 
           echo "✅ KSU integrated"
@@ -164,4 +165,5 @@ jobs:
           name: "build-log-${{ github.run_id }}"
           path: build.log
           retention-days: 3
+
 
