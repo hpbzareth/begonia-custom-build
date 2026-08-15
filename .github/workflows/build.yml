@@ -89,8 +89,8 @@ jobs:
           cd ../ksu-cocci/classic-hooks
           bash apply.sh ../../kernel_source
           cd ../../kernel_source
-          sed -i '/#include "internal.h"/a static inline int check_mnt(struct mount *mnt);\\nstatic int do_umount(struct mount *mnt, int flags);\\nstatic void mntput_no_expire(struct mount *mnt);\\nstatic inline bool may_mount(void);' fs/namespace.c
-          sed -i '/mutex_lock(&reboot_mutex);/i #ifdef CONFIG_KSU\\nextern void ksu_handle_sys_reboot(void);\\nksu_handle_sys_reboot();\\n#endif' kernel/reboot.c
+          perl -pi -e 's/#include "internal.h"/#include "internal.h"\nstatic inline int check_mnt(struct mount *mnt);\nstatic int do_umount(struct mount *mnt, int flags);\nstatic void mntput_no_expire(struct mount *mnt);\nstatic inline bool may_mount(void);\n/g' fs/namespace.c
+          perl -pi -e 's/mutex_lock\(&reboot_mutex\);/#ifdef CONFIG_KSU\nextern void ksu_handle_sys_reboot(void);\nksu_handle_sys_reboot();\n#endif\n\tmutex_lock(&reboot_mutex);/g' kernel/reboot.c
           scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KSU
 
           echo "✅ KSU integrated"
