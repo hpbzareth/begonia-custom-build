@@ -62,9 +62,16 @@ jobs:
           # Mày dặn dùng bản legacy của KSU-Next. (Tag v1.1.1 ko có legacy, nên tao kéo thẳng branch legacy mới nhất)
           curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
 
-          echo "Enabling KPROBES (instead of manual hooks) and KSU..."
+          echo "Disabling KPROBES and applying manual hooks..."
           # Enable KPROBES để KSU tự động hook mà ko cần patch file cồng kềnh
-          scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KPROBES -e KPROBE_EVENTS
+          scripts/config --file arch/arm64/configs/begonia_user_defconfig -d KPROBES -d KPROBE_EVENTS
+          scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KSU_MANUAL_HOOK
+
+          echo "Installing Coccinelle and applying manual hooks..."
+          sudo apt-get update && sudo apt-get install -y coccinelle
+          git clone https://github.com/devnoname120/kernelsu-coccinelle.git ../ksu-cocci
+          cd ../ksu-cocci/classic-hooks
+          bash apply.sh ../../kernel_source
           scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KSU
 
           echo "✅ KSU integrated"
@@ -157,3 +164,4 @@ jobs:
           name: "build-log-${{ github.run_id }}"
           path: build.log
           retention-days: 3
+
