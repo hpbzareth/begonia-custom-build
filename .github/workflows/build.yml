@@ -9,27 +9,9 @@ on:
         default: "aosp-13"
         type: choice
         options:
-          - fifteen
-          - fourteen
           - aosp-13
-
-env:
-  # ── Kernel ──────────────────────────────────────────────
-  KERNEL_REPO: "https://github.com/xiaomi-begonia-dev/android_kernel_xiaomi_mt6785"
-  ARCH: "arm64"
-  DEFCONFIG: "begonia_user_defconfig"
-  OUT_DIR: "${{ github.workspace }}/out"
-
-  # ── Toolchain (crDroid Clang r547379) ───────────────────
-  CLANG_REPO: "https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379"
-  CLANG_BRANCH: "15.0"
-
-  # ── KernelSU Next + SUSFS ───────────────────────────────
-  KSU_REPO: "https://github.com/sidex15/KernelSU-Next"
-  KSU_BRANCH: "legacy"
-
-  # ── AnyKernel3 ──────────────────────────────────────────
-  AK3_REPO: "https://github.com/osm0sis/AnyKernel3"
+          - fourteen
+          - fifteen
 
 jobs:
   build:
@@ -37,10 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      # ─────────────────────────────────────────────────────
-      # 1. Dependencies
-      # ─────────────────────────────────────────────────────
-      - name: "📦 Install build dependencies"
+      - name: "📦 Install dependencies"
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
@@ -48,82 +27,83 @@ jobs:
             libssl-dev libfl-dev \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
-            curl git zip unzip tar python3 ccache
+            curl git zip unzip python3 ccache
 
-      # ─────────────────────────────────────────────────────
-      # 2. Toolchain
-      # ─────────────────────────────────────────────────────
-      - name: "🔧 Clone crDroid Clang toolchain"
+      - name: "🔧 Clone Clang toolchain"
         run: |
           git clone --depth=1 \
-            --branch "$CLANG_BRANCH" \
-            "$CLANG_REPO" \
-            "${{ github.workspace }}/clang"
-          echo "${{ github.workspace }}/clang/bin" >> $GITHUB_PATH
+            --branch 15.0 \
+            https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379 \
+            clang
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      # ─────────────────────────────────────────────────────
-      # 3. Kernel source
-      # ─────────────────────────────────────────────────────
-      - name: "📥 Clone kernel source (${{ github.event.inputs.kernel_branch }})"
+      - name: "📥 Clone kernel source"
         run: |
           git clone --depth=1 \
-            --branch "${{ github.event.inputs.kernel_branch }}" \
-            "$KERNEL_REPO" \
+            --branch ${{ github.event.inputs.kernel_branch }} \
+            https://github.com/xiaomi-begonia-dev/android_kernel_xiaomi_mt6785 \
             kernel_source
 
-      # ─────────────────────────────────────────────────────
-      # 4. KernelSU Next (sidex15 legacy-susfs-v2)
-      # ─────────────────────────────────────────────────────
-      - name: "🌿 Integrate KernelSU-Next + SUSFS (legacy)"
+      - name: "🌿 Integrate KernelSU-Next (legacy)"
         working-directory: kernel_source
         run: |
-          echo "━━━ Step 1: Run setup.sh from sidex15/legacy-susfs-v2 ━━━"
-          # Fetch setup.sh trực tiếp từ nhánh đúng để patch Makefile/Kconfig
-          curl -LSs \
-            "https://raw.githubusercontent.com/sidex15/KernelSU-Next/$KSU_BRANCH/kernel/setup.sh" \
-            | bash -s "$KSU_BRANCH"
+          # Clone KernelSU-Next legacy vào thư mục KernelSU-Next
+          git clone --depth=1 \
+            --branch legacy \
+            https://github.com/sidex15/KernelSU-Next \
+            KernelSU-Next
 
-          echo "━━━ Step 2: Verify KernelSU integration ━━━"
-          KSU_VERSION=$(git -C KernelSU describe --tags --abbrev=0 2>/dev/null || echo "unknown")
-          echo "✅ KernelSU-Next version: $KSU_VERSION"
+          # Chạy setup.sh → tạo drivers/kernelsu symlink + patch Makefile/Kconfig
+          bash KernelSU-Next/kernel/setup.sh
 
-          echo "━━━ Step 3: Enable KSU + SUSFS configs ━━━"
-          CFG="arch/arm64/configs/$DEFCONFIG"
-          set_config() {
+          # Apply manual hooks vào kernel source (bắt buộc với non-GKI kernel 4.14)
+          # KSU cung cấp sẵn patch file cho manual hook
+          HOOK_PATCH="KernelSU-Next/kernel/manual_hook.patch"
+          if [ -f "$HOOK_PATCH" ]; then
+            echo "Applying manual hook patch..."
+            patch -p1 < "$HOOK_PATCH"
+          else
+            # Fallback: apply hooks thủ công vào các file cần thiết
+            echo "No patch file found, applying hooks manually..."
+
+            # Hook vào fs/exec.c - execve hook
+            if grep -q "int __do_execve_file" fs/exec.c 2>/dev/null || grep -q "static int do_execveat_common" fs/exec.c 2>/dev/null; then
+              curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/compat/patches/exec.patch" | patch -p1 --forward || true
+            fi
+
+            # Hook vào fs/open.c - faccessat hook  
+            curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/compat/patches/open.patch" | patch -p1 --forward || true
+
+            # Hook vào fs/read_write.c - read hook
+            curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/compat/patches/read_write.patch" | patch -p1 --forward || true
+          fi
+
+          # Pastikan CONFIG_KSU_MANUAL_HOOK aktif
+          CFG="arch/arm64/configs/begonia_user_defconfig"
+          set_cfg() {
             local key="$1"
-            local val="$2"
             if grep -q "# $key is not set" "$CFG"; then
-              sed -i "s/# $key is not set/$key=$val/" "$CFG"
-            elif grep -q "^$key=" "$CFG"; then
-              sed -i "s/^$key=.*/$key=$val/" "$CFG"
-            else
-              echo "$key=$val" >> "$CFG"
+              sed -i "s/# $key is not set/$key=y/" "$CFG"
+            elif ! grep -q "^$key=" "$CFG"; then
+              echo "$key=y" >> "$CFG"
             fi
           }
+          set_cfg CONFIG_KSU
+          set_cfg CONFIG_KSU_MANUAL_HOOK
 
-          set_config CONFIG_KSU              y
-          set_config CONFIG_KSU_MANUAL_HOOK  y   # Bắt buộc cho non-GKI (kernel 4.14)
+          echo "✅ KSU $(git -C KernelSU-Next describe --tags 2>/dev/null) integrated"
+          grep "^CONFIG_KSU" arch/arm64/configs/begonia_user_defconfig
 
-          echo "✅ Defconfig updated:"
-          grep -E "^CONFIG_KSU" "$CFG"
-
-      # ─────────────────────────────────────────────────────
-      # 5. AnyKernel3
-      # ─────────────────────────────────────────────────────
       - name: "🗜️ Clone AnyKernel3"
         run: |
-          git clone --depth=1 "$AK3_REPO" AnyKernel3
-          # Xoá file thừa không cần thiết cho packaging
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
           rm -f AnyKernel3/{LICENSE,README.md}
 
-      # ─────────────────────────────────────────────────────
-      # 6. make defconfig
-      # ─────────────────────────────────────────────────────
       - name: "⚙️ Generate defconfig"
         working-directory: kernel_source
         run: |
           make -j$(nproc) \
-            ARCH=$ARCH \
+            ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -134,17 +114,14 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            O=$OUT_DIR \
-            $DEFCONFIG
+            O=$GITHUB_WORKSPACE/out \
+            begonia_user_defconfig
 
-      # ─────────────────────────────────────────────────────
-      # 7. Build
-      # ─────────────────────────────────────────────────────
       - name: "🏗️ Build kernel"
         working-directory: kernel_source
         run: |
           make -j$(nproc) \
-            ARCH=$ARCH \
+            ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -155,60 +132,46 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            O=$OUT_DIR \
-            2>&1 | tee "${{ github.workspace }}/build.log"
+            O=$GITHUB_WORKSPACE/out \
+            2>&1 | tee $GITHUB_WORKSPACE/build.log
 
-          echo "━━━ Build finished: $(date) ━━━"
-
-      # ─────────────────────────────────────────────────────
-      # 8. Package
-      # ─────────────────────────────────────────────────────
       - name: "📦 Package AnyKernel3 zip"
         run: |
-          # Tìm kernel image (ưu tiên Image.gz-dtb → Image.gz → Image)
-          BOOT_DIR="$OUT_DIR/arch/arm64/boot"
+          BOOT_DIR="$GITHUB_WORKSPACE/out/arch/arm64/boot"
+
+          echo "Contents of boot dir:"
+          ls "$BOOT_DIR" || { echo "Boot dir not found!"; exit 1; }
+
           KERNEL_IMG=""
           for img in Image.gz-dtb Image.gz Image; do
             if [ -f "$BOOT_DIR/$img" ]; then
               KERNEL_IMG="$BOOT_DIR/$img"
-              echo "✅ Found kernel image: $img"
+              echo "✅ Found: $img"
               break
             fi
           done
 
-          if [ -z "$KERNEL_IMG" ]; then
-            echo "❌ No kernel image found! Contents of boot dir:"
-            ls "$BOOT_DIR" || true
-            exit 1
-          fi
+          [ -z "$KERNEL_IMG" ] && { echo "❌ No kernel image!"; exit 1; }
 
           cp "$KERNEL_IMG" AnyKernel3/
 
-          # Tạo tên file zip
           BUILD_DATE=$(date +%Y%m%d-%H%M)
-          KSU_VER=$(git -C kernel_source/KernelSU describe --tags --abbrev=0 2>/dev/null || echo "KSU")
+          KSU_VER=$(git -C kernel_source/KernelSU-Next describe --tags --abbrev=0 2>/dev/null || echo "KSU")
           ZIP_NAME="Begonia-${{ github.event.inputs.kernel_branch }}-${KSU_VER}-${BUILD_DATE}"
 
           cd AnyKernel3
-          zip -r9 "${{ github.workspace }}/${ZIP_NAME}.zip" . \
-            -x '*.git*' '*.github*' '*placeholder'
+          zip -r9 "$GITHUB_WORKSPACE/${ZIP_NAME}.zip" . -x '*.git*' '*.github*' '*placeholder'
 
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          echo "✅ Packaged: ${ZIP_NAME}.zip ($(du -sh ${{ github.workspace }}/${ZIP_NAME}.zip | cut -f1))"
+          echo "✅ Done: ${ZIP_NAME}.zip"
 
-      # ─────────────────────────────────────────────────────
-      # 9. Upload artifact
-      # ─────────────────────────────────────────────────────
-      - name: "📤 Upload kernel zip"
+      - name: "📤 Upload artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}.zip
           retention-days: 7
 
-      # ─────────────────────────────────────────────────────
-      # 10. Upload log on failure
-      # ─────────────────────────────────────────────────────
       - name: "📋 Upload build log (on failure)"
         if: failure()
         uses: actions/upload-artifact@v4
