@@ -47,6 +47,7 @@ jobs:
             build-essential bc bison flex \
             libssl-dev libfl-dev \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
             curl git zip unzip tar python3 ccache
 
       # ─────────────────────────────────────────────────────
@@ -124,13 +125,19 @@ jobs:
         working-directory: kernel_source
         run: |
           make -j$(nproc) \
-            ARCH="$ARCH" \
+            ARCH=$ARCH \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            O="$OUT_DIR" \
-            "$DEFCONFIG"
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            O=$OUT_DIR \
+            $DEFCONFIG
 
       # ─────────────────────────────────────────────────────
       # 7. Build
@@ -139,12 +146,18 @@ jobs:
         working-directory: kernel_source
         run: |
           make -j$(nproc) \
-            ARCH="$ARCH" \
+            ARCH=$ARCH \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            O="$OUT_DIR" \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            O=$OUT_DIR \
             2>&1 | tee "${{ github.workspace }}/build.log"
 
           echo "━━━ Build finished: $(date) ━━━"
