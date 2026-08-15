@@ -55,43 +55,19 @@ jobs:
 
           # Chạy setup.sh → tạo drivers/kernelsu symlink + patch Makefile/Kconfig
           bash KernelSU-Next/kernel/setup.sh
+      - name: "🌿 Integrate KernelSU-Next"
+        working-directory: kernel_source
+        run: |
+          echo "Downloading KernelSU-Next..."
+          # Mày dặn dùng bản legacy của KSU-Next. (Tag v1.1.1 ko có legacy, nên tao kéo thẳng branch legacy mới nhất)
+          curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
 
-          # Apply manual hooks vào kernel source (bắt buộc với non-GKI kernel 4.14)
-          # KSU cung cấp sẵn patch file cho manual hook
-          HOOK_PATCH="KernelSU-Next/kernel/manual_hook.patch"
-          if [ -f "$HOOK_PATCH" ]; then
-            echo "Applying manual hook patch..."
-            patch -p1 < "$HOOK_PATCH"
-          else
-            # Fallback: apply hooks thủ công vào các file cần thiết
-            echo "No patch file found, applying hooks manually..."
+          echo "Enabling KPROBES (instead of manual hooks) and KSU..."
+          # Enable KPROBES để KSU tự động hook mà ko cần patch file cồng kềnh
+          scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KPROBES -e KPROBE_EVENTS
+          scripts/config --file arch/arm64/configs/begonia_user_defconfig -e KSU
 
-            # Hook vào fs/exec.c - execve hook
-            if grep -q "int __do_execve_file" fs/exec.c 2>/dev/null || grep -q "static int do_execveat_common" fs/exec.c 2>/dev/null; then
-              curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/compat/patches/exec.patch" | patch -p1 --forward || true
-            fi
-
-            # Hook vào fs/open.c - faccessat hook  
-            curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/compat/patches/open.patch" | patch -p1 --forward || true
-
-            # Hook vào fs/read_write.c - read hook
-            curl -LSs "https://raw.githubusercontent.com/sidex15/KernelSU-Next/legacy/kernel/compat/patches/read_write.patch" | patch -p1 --forward || true
-          fi
-
-          # Pastikan CONFIG_KSU_MANUAL_HOOK aktif
-          CFG="arch/arm64/configs/begonia_user_defconfig"
-          set_cfg() {
-            local key="$1"
-            if grep -q "# $key is not set" "$CFG"; then
-              sed -i "s/# $key is not set/$key=y/" "$CFG"
-            elif ! grep -q "^$key=" "$CFG"; then
-              echo "$key=y" >> "$CFG"
-            fi
-          }
-          set_cfg CONFIG_KSU
-          set_cfg CONFIG_KSU_MANUAL_HOOK
-
-          echo "✅ KSU $(git -C KernelSU-Next describe --tags 2>/dev/null) integrated"
+          echo "✅ KSU integrated"
           grep "^CONFIG_KSU" arch/arm64/configs/begonia_user_defconfig
 
       - name: "🗜️ Clone AnyKernel3"
@@ -120,27 +96,31 @@ jobs:
       - name: "🏗️ Build kernel"
         working-directory: kernel_source
         run: |
+          set -o pipefail
+          
+          # Sửa lỗi vdso32 khi dùng GCC ARM32
+          sed -i 's/$(LD) -shared/$(CROSS_COMPILE_ARM32)ld -shared/g' arch/arm64/kernel/vdso32/Makefile || true
+          
           make -j$(nproc) \
             ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
             O=$GITHUB_WORKSPACE/out \
             2>&1 | tee $GITHUB_WORKSPACE/build.log
 
       - name: "📦 Package AnyKernel3 zip"
         run: |
           BOOT_DIR="$GITHUB_WORKSPACE/out/arch/arm64/boot"
-
-          echo "Contents of boot dir:"
-          ls "$BOOT_DIR" || { echo "Boot dir not found!"; exit 1; }
+          
+          if [ ! -f "$BOOT_DIR/Image.gz" ]; then
+            echo "No kernel image found! Contents of boot dir:"
+            ls -la "$BOOT_DIR" || echo "Boot dir does not exist!"
+            echo "Contents of out dir:"
+            ls -la "$GITHUB_WORKSPACE/out/"
+            exit 1
+          fi
 
           KERNEL_IMG=""
           for img in Image.gz-dtb Image.gz Image; do
