@@ -26,7 +26,7 @@ env:
 
   # ── KernelSU Next + SUSFS ───────────────────────────────
   KSU_REPO: "https://github.com/sidex15/KernelSU-Next"
-  KSU_BRANCH: "legacy-susfs-v2"
+  KSU_BRANCH: "legacy"
 
   # ── AnyKernel3 ──────────────────────────────────────────
   AK3_REPO: "https://github.com/osm0sis/AnyKernel3"
@@ -103,8 +103,6 @@ jobs:
 
           set_config CONFIG_KSU              y
           set_config CONFIG_KSU_MANUAL_HOOK  y   # Bắt buộc cho non-GKI (kernel 4.14)
-          set_config CONFIG_KSU_SUSFS        y
-          set_config CONFIG_KSU_SUSFS_SUS_SU y   # su hiding (SUSFS v2)
 
           echo "✅ Defconfig updated:"
           grep -E "^CONFIG_KSU" "$CFG"
@@ -189,7 +187,7 @@ jobs:
           # Tạo tên file zip
           BUILD_DATE=$(date +%Y%m%d-%H%M)
           KSU_VER=$(git -C kernel_source/KernelSU describe --tags --abbrev=0 2>/dev/null || echo "KSU")
-          ZIP_NAME="Begonia-${{ github.event.inputs.kernel_branch }}-${KSU_VER}-SUSFS-${BUILD_DATE}"
+          ZIP_NAME="Begonia-${{ github.event.inputs.kernel_branch }}-${KSU_VER}-${BUILD_DATE}"
 
           cd AnyKernel3
           zip -r9 "${{ github.workspace }}/${ZIP_NAME}.zip" . \
