@@ -227,36 +227,8 @@ jobs:
           cd $GITHUB_WORKSPACE/AnyKernel3
           rm -f LICENSE README.md
 
-          # Configure anykernel.sh for Begonia
-          cat << 'EOF' > anykernel.sh
-### AnyKernel3 setup for Redmi Note 8 Pro (Begonia / MT6785)
-properties() { '
-kernel.string=Begonia Custom Kernel with KernelSU-Next & SuSFS
-do.devicecheck=1
-do.modules=0
-do.systemless=1
-do.cleanup=1
-do.cleanuponabort=0
-device.name1=begonia
-device.name2=begoniain
-supported.versions=
-supported.patchlevels=
-'; }
-
-# shell variables
-block=/dev/block/bootdevice/by-name/boot;
-is_slot_device=0;
-ramdisk_compression=auto;
-
-## AnyKernel methods (DO NOT CHANGE)
-. tools/ak3-core.sh;
-
-## AnyKernel install
-split_boot;
-flash_boot;
-## end install
-EOF
-
+          # Copy AnyKernel3 configuration for Begonia
+          cp $GITHUB_WORKSPACE/templates/anykernel.sh anykernel.sh
           cp "$KERNEL_IMG" ./
 
           mkdir -p $GITHUB_WORKSPACE/output
@@ -297,7 +269,6 @@ EOF
           cd $GITHUB_WORKSPACE/output
           echo "=== Downloading Matching Manager APKs ==="
           
-          # KernelSU-Next Manager APKs from release Revision-1
           wget -q -c "https://github.com/hpbzareth/flop-trinket-ksun-susfs/releases/download/Revision-1/KernelSU_Next_v3.4.2_uapi6-33553-release.apk" || true
           wget -q -c "https://github.com/hpbzareth/flop-trinket-ksun-susfs/releases/download/Revision-1/KernelSU_Next_v3.4.2_uapi5-33355-release.apk" || true
           wget -q -c "https://github.com/hpbzareth/flop-trinket-ksun-susfs/releases/download/Revision-1/APatch_11282_e8e4651_HEAD-release-signed.apk" || true
@@ -334,39 +305,17 @@ EOF
           
           RELEASE_TITLE="Redmi Note 8 Pro (Begonia) Kernel — $RELEASE_TAG"
           
-          cat << EOF > /tmp/release_notes.md
-          ## 📱 Redmi Note 8 Pro (Begonia / MT6785) Custom Kernel
-          
-          Automated build for **Xiaomi Redmi Note 8 Pro** (`begonia` / `begoniain`) compiled with **crDroid Clang 15** against \`xiaomi-begonia-dev/android_kernel_xiaomi_mt6785\` branch \`${BRANCH}\`.
-          
-          ### 📦 Package Details:
-          - **Kernel Image:** AnyKernel3 flashable zip (\`${{ env.ZIP_NAME }}.zip\`)
-          - **Root Engine:** **KernelSU-Next v3.4.2**
-          - **Anti-Detection:** **SuSFS v2.2.0**
-          - **Branch:** \`${BRANCH}\`
-          - **Variant:** \`${VARIANT_TAG}\`
-          
-          ### 🛡️ Recommended Manager APKs:
-          - **KernelSU-Next UAPI v6:** \`KernelSU_Next_v3.4.2_uapi6-33553-release.apk\`
-          - **KernelSU-Next UAPI v5:** \`KernelSU_Next_v3.4.2_uapi5-33355-release.apk\`
-          - **APatch:** \`APatch_11282_e8e4651_HEAD-release-signed.apk\`
-          
-          ### ⚡ Installation Instructions:
-          1. Download \`${{ env.ZIP_NAME }}.zip\` and the corresponding Manager APK.
-          2. Boot into **TWRP / OrangeFox Recovery**.
-          3. *(Recommended)* Backup current Boot partition.
-          4. Flash the zip file.
-          5. Reboot to System and install the Manager APK.
-          EOF
+          echo "Redmi Note 8 Pro (Begonia) Custom Kernel build with KernelSU-Next v3.4.2 and SuSFS v2.2.0" > /tmp/release_notes.txt
+          echo "Branch: ${BRANCH} | Variant: ${VARIANT_TAG}" >> /tmp/release_notes.txt
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Updating existing release $RELEASE_TAG..."
             gh release upload "$RELEASE_TAG" output/* --clobber
-            gh release edit "$RELEASE_TAG" --notes-file /tmp/release_notes.md
+            gh release edit "$RELEASE_TAG" --notes-file /tmp/release_notes.txt
           else
             echo "Creating new release $RELEASE_TAG..."
             gh release create "$RELEASE_TAG" output/* \
               --title "$RELEASE_TITLE" \
-              --notes-file /tmp/release_notes.md
+              --notes-file /tmp/release_notes.txt
           fi
           echo "✅ Release $RELEASE_TAG published successfully!"
