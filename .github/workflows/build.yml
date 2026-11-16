@@ -144,8 +144,10 @@ jobs:
 
           if [ "$VARIANT" != "vanilla" ]; then
             echo "Enabling KernelSU configs..."
-            scripts/config --file "$DEFCONFIG" -e KSU
             scripts/config --file "$DEFCONFIG" -e KSU_NEXT
+            scripts/config --file "$DEFCONFIG" -e KSU
+            scripts/config --file "$DEFCONFIG" -e KSU_MANUAL_HOOK
+            scripts/config --file "$DEFCONFIG" -d KSU_KPROBES_HOOK
 
             if [ "$VARIANT" = "ksun_uapi6_susfs" ] || [ "$VARIANT" = "ksun_uapi5_susfs" ]; then
               echo "Enabling SuSFS configs..."
@@ -160,6 +162,7 @@ jobs:
               scripts/config --file "$DEFCONFIG" -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
               scripts/config --file "$DEFCONFIG" -e KSU_SUSFS_OPEN_REDIRECT
               scripts/config --file "$DEFCONFIG" -e KSU_SUSFS_SUS_MAP
+              scripts/config --file "$DEFCONFIG" -e KSU_SUSFS_SUS_MEMFD
             fi
           fi
 
@@ -198,6 +201,12 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
             O=$GITHUB_WORKSPACE/out \
             2>&1 | tee $GITHUB_WORKSPACE/build.log
 

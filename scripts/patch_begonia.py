@@ -163,33 +163,56 @@ def copy_susfs_files(kernel_dir, susfs_dir):
         shutil.copy2(susfs_def_h, os.path.join(inc_dir, "susfs_def.h"))
         log("Copied susfs_def.h to include/linux/")
 
-def ensure_makefiles(kernel_dir):
-    # drivers/Makefile
+def ensure_makefiles(kernel_dir, patches_dir):
+    # 1. Copy su_variants.Kconfig to drivers/su_variants.Kconfig
+    su_variants_src = os.path.join(patches_dir, "su_variants.Kconfig")
+    su_variants_dst = os.path.join(kernel_dir, "drivers", "su_variants.Kconfig")
+    if os.path.exists(su_variants_src):
+        shutil.copy2(su_variants_src, su_variants_dst)
+        log("Copied su_variants.Kconfig to drivers/su_variants.Kconfig")
+    
+    # 2. Ensure drivers/kernelsu/Kconfig exists
+    ksu_dir = os.path.join(kernel_dir, "drivers", "kernelsu")
+    os.makedirs(ksu_dir, exist_ok=True)
+    ksu_kc = os.path.join(ksu_dir, "Kconfig")
+    with open(ksu_kc, "w", encoding="utf-8", newline="\n") as f:
+        f.write('source "drivers/kernelsu/kernel/Kconfig"\n')
+    log("Created drivers/kernelsu/Kconfig redirect")
+    
+    # 3. Ensure drivers/kernelsu/Makefile exists
+    ksu_mk = os.path.join(ksu_dir, "Makefile")
+    with open(ksu_mk, "w", encoding="utf-8", newline="\n") as f:
+        f.write('obj-y += kernel/\n')
+    log("Created drivers/kernelsu/Makefile redirect")
+
+    # 4. drivers/Makefile
     drv_mk = os.path.join(kernel_dir, "drivers", "Makefile")
     if os.path.exists(drv_mk):
         with open(drv_mk, "r", encoding="utf-8", errors="ignore") as f:
             c = f.read()
         if "kernelsu" not in c:
-            c += "\nobj-$(CONFIG_KSU) += kernelsu/\n"
+            c += "\n# KernelSU-Next\nobj-$(CONFIG_KSU_NEXT) += kernelsu/kernel/\n"
             with open(drv_mk, "w", encoding="utf-8", newline="\n") as f:
                 f.write(c)
-            log("Added kernelsu to drivers/Makefile")
+            log("Added obj-$(CONFIG_KSU_NEXT) += kernelsu/kernel/ to drivers/Makefile")
             
-    # drivers/Kconfig
+    # 5. drivers/Kconfig
     drv_kc = os.path.join(kernel_dir, "drivers", "Kconfig")
     if os.path.exists(drv_kc):
         with open(drv_kc, "r", encoding="utf-8", errors="ignore") as f:
             c = f.read()
-        if "drivers/kernelsu/Kconfig" not in c:
+        if "drivers/su_variants.Kconfig" not in c:
             if "endmenu" in c:
-                c = c.replace("endmenu", 'source "drivers/kernelsu/Kconfig"\n\nendmenu', 1)
+                # Replace last endmenu
+                idx = c.rfind("endmenu")
+                c = c[:idx] + 'source "drivers/su_variants.Kconfig"\n\nendmenu' + c[idx+7:]
             else:
-                c += '\nsource "drivers/kernelsu/Kconfig"\n'
+                c += '\nsource "drivers/su_variants.Kconfig"\n'
             with open(drv_kc, "w", encoding="utf-8", newline="\n") as f:
                 f.write(c)
-            log("Added source drivers/kernelsu/Kconfig to drivers/Kconfig")
+            log("Added source drivers/su_variants.Kconfig to drivers/Kconfig")
 
-    # fs/Makefile
+    # 6. fs/Makefile
     fs_mk = os.path.join(kernel_dir, "fs", "Makefile")
     if os.path.exists(fs_mk):
         with open(fs_mk, "r", encoding="utf-8", errors="ignore") as f:
@@ -221,7 +244,7 @@ def main():
     susfs_dir = os.path.join(patches_dir, "susfs")
     copy_susfs_files(kernel_dir, susfs_dir)
     
-    ensure_makefiles(kernel_dir)
+    ensure_makefiles(kernel_dir, patches_dir)
     log("All Begonia kernel patches and hooks applied successfully!")
 
 if __name__ == "__main__":
