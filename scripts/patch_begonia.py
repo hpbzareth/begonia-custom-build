@@ -99,6 +99,37 @@ typedef unsigned int __poll_t;
                 f.write(c)
             log("Ensured __poll_t fallback in drivers/kernelsu/kernel/infra/event_queue.h")
 
+def inject_boottime_helpers(kernel_dir):
+    tk_h = os.path.join(kernel_dir, "include", "linux", "timekeeping.h")
+    if os.path.exists(tk_h):
+        with open(tk_h, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        if "ktime_get_boottime_ts64" not in content:
+            target = "static inline void get_monotonic_boottime64(struct timespec64 *ts)"
+            helper = """static inline void ktime_get_boottime_ts64(struct timespec64 *ts)
+{
+\t*ts = ktime_to_timespec64(ktime_get_boottime());
+}
+
+static inline void get_monotonic_boottime64(struct timespec64 *ts)"""
+            if target in content:
+                content = content.replace(target, helper, 1)
+                with open(tk_h, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(content)
+                log("Injected ktime_get_boottime_ts64 into include/linux/timekeeping.h")
+
+    event_c = os.path.join(kernel_dir, "drivers", "kernelsu", "kernel", "sulog", "event.c")
+    if os.path.exists(event_c):
+        with open(event_c, "r", encoding="utf-8", errors="ignore") as f:
+            c = f.read()
+        target = "ktime_get_boottime_ts64(ts);"
+        repl = "*ts = ktime_to_timespec64(ktime_get_boottime());"
+        if target in c:
+            c = c.replace(target, repl, 1)
+            with open(event_c, "w", encoding="utf-8", newline="\n") as f:
+                f.write(c)
+            log("Fixed ksu_sulog_boottime in drivers/kernelsu/kernel/sulog/event.c")
+
 def apply_susfs_patch(kernel_dir, patch_file):
     if not os.path.exists(patch_file):
         log(f"Patch file {patch_file} not found!")
@@ -307,6 +338,7 @@ def main():
     fix_mmc_block(kernel_dir)
     inject_ida_helpers(kernel_dir)
     inject_poll_helpers(kernel_dir)
+    inject_boottime_helpers(kernel_dir)
     
     susfs_patch = os.path.join(patches_dir, "susfs_v2.2_for_begonia.patch")
     apply_susfs_patch(kernel_dir, susfs_patch)
