@@ -63,6 +63,42 @@ static inline void ida_free(struct ida *ida, unsigned int id)
                 f.write(content)
             log("Injected ida_alloc, ida_alloc_min, ida_free into include/linux/idr.h")
 
+def inject_poll_helpers(kernel_dir):
+    poll_h = os.path.join(kernel_dir, "include", "linux", "poll.h")
+    if os.path.exists(poll_h):
+        with open(poll_h, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        if "__poll_t" not in content:
+            target = "#include <uapi/linux/poll.h>"
+            helpers = """#include <uapi/linux/poll.h>
+
+#ifndef __poll_t
+#define __poll_t __poll_t
+typedef unsigned int __poll_t;
+#endif
+"""
+            if target in content:
+                content = content.replace(target, helpers, 1)
+                with open(poll_h, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(content)
+                log("Injected __poll_t typedef into include/linux/poll.h")
+
+    # Also ensure drivers/kernelsu/kernel/infra/event_queue.h has fallback
+    event_queue_h = os.path.join(kernel_dir, "drivers", "kernelsu", "kernel", "infra", "event_queue.h")
+    if os.path.exists(event_queue_h):
+        with open(event_queue_h, "r", encoding="utf-8", errors="ignore") as f:
+            c = f.read()
+        if "// #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)" in c:
+            poll_def = """#ifndef __poll_t
+#define __poll_t __poll_t
+typedef unsigned int __poll_t;
+#endif
+// #if 0"""
+            c = c.replace("// #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)", poll_def)
+            with open(event_queue_h, "w", encoding="utf-8", newline="\n") as f:
+                f.write(c)
+            log("Ensured __poll_t fallback in drivers/kernelsu/kernel/infra/event_queue.h")
+
 def apply_susfs_patch(kernel_dir, patch_file):
     if not os.path.exists(patch_file):
         log(f"Patch file {patch_file} not found!")
@@ -270,6 +306,7 @@ def main():
     
     fix_mmc_block(kernel_dir)
     inject_ida_helpers(kernel_dir)
+    inject_poll_helpers(kernel_dir)
     
     susfs_patch = os.path.join(patches_dir, "susfs_v2.2_for_begonia.patch")
     apply_susfs_patch(kernel_dir, susfs_patch)
