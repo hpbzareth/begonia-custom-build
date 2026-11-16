@@ -130,6 +130,41 @@ static inline void get_monotonic_boottime64(struct timespec64 *ts)"""
                 f.write(c)
             log("Fixed ksu_sulog_boottime in drivers/kernelsu/kernel/sulog/event.c")
 
+def fix_ksu_compat(kernel_dir):
+    dispatch_c = os.path.join(kernel_dir, "drivers", "kernelsu", "kernel", "supercall", "dispatch.c")
+    if os.path.exists(dispatch_c):
+        with open(dispatch_c, "r", encoding="utf-8", errors="ignore") as f:
+            c = f.read()
+        if "KSYM_NAME_LEN" not in c or "#include <linux/kallsyms.h>" not in c:
+            hdr = """#include <linux/capability.h>
+#include <linux/kallsyms.h>
+
+#ifndef KSYM_NAME_LEN
+#define KSYM_NAME_LEN 128
+#endif"""
+            c = c.replace("#include <linux/capability.h>", hdr, 1)
+            with open(dispatch_c, "w", encoding="utf-8", newline="\n") as f:
+                f.write(c)
+            log("Injected kallsyms.h and KSYM_NAME_LEN into drivers/kernelsu/kernel/supercall/dispatch.c")
+
+    compat_h = os.path.join(kernel_dir, "drivers", "kernelsu", "kernel", "compat", "kernel_compat.h")
+    if os.path.exists(compat_h):
+        with open(compat_h, "r", encoding="utf-8", errors="ignore") as f:
+            c = f.read()
+        if "KSYM_NAME_LEN" not in c:
+            extra = """
+#include <linux/kallsyms.h>
+#ifndef KSYM_NAME_LEN
+#define KSYM_NAME_LEN 128
+#endif
+"""
+            target = "#define __KSU_H_KERNEL_COMPAT"
+            if target in c:
+                c = c.replace(target, target + extra, 1)
+                with open(compat_h, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(c)
+                log("Added KSYM_NAME_LEN fallback to kernel_compat.h")
+
 def apply_susfs_patch(kernel_dir, patch_file):
     if not os.path.exists(patch_file):
         log(f"Patch file {patch_file} not found!")
@@ -339,6 +374,7 @@ def main():
     inject_ida_helpers(kernel_dir)
     inject_poll_helpers(kernel_dir)
     inject_boottime_helpers(kernel_dir)
+    fix_ksu_compat(kernel_dir)
     
     susfs_patch = os.path.join(patches_dir, "susfs_v2.2_for_begonia.patch")
     apply_susfs_patch(kernel_dir, susfs_patch)
