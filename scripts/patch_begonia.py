@@ -29,6 +29,40 @@ def fix_mmc_block(kernel_dir):
         f.writelines(clean_lines)
     log("Fixed mmc block.c merge conflict markers")
 
+def inject_ida_helpers(kernel_dir):
+    idr_h = os.path.join(kernel_dir, "include", "linux", "idr.h")
+    if not os.path.exists(idr_h):
+        return
+    
+    with open(idr_h, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read()
+    
+    if "ida_alloc" not in content:
+        target = "void ida_simple_remove(struct ida *ida, unsigned int id);"
+        helpers = """
+static inline int ida_alloc_range(struct ida *ida, unsigned int min, unsigned int max, gfp_t gfp)
+{
+	return ida_simple_get(ida, min, max, gfp);
+}
+static inline int ida_alloc_min(struct ida *ida, unsigned int min, gfp_t gfp)
+{
+	return ida_simple_get(ida, min, 0, gfp);
+}
+static inline int ida_alloc(struct ida *ida, gfp_t gfp)
+{
+	return ida_simple_get(ida, 0, 0, gfp);
+}
+static inline void ida_free(struct ida *ida, unsigned int id)
+{
+	ida_simple_remove(ida, id);
+}
+"""
+        if target in content:
+            content = content.replace(target, target + "\n" + helpers, 1)
+            with open(idr_h, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+            log("Injected ida_alloc, ida_alloc_min, ida_free into include/linux/idr.h")
+
 def apply_susfs_patch(kernel_dir, patch_file):
     if not os.path.exists(patch_file):
         log(f"Patch file {patch_file} not found!")
@@ -235,6 +269,7 @@ def main():
     log(f"Patches dir: {patches_dir}")
     
     fix_mmc_block(kernel_dir)
+    inject_ida_helpers(kernel_dir)
     
     susfs_patch = os.path.join(patches_dir, "susfs_v2.2_for_begonia.patch")
     apply_susfs_patch(kernel_dir, susfs_patch)
